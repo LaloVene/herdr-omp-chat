@@ -4,11 +4,17 @@
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { exec, theme } from "herdr";
+import { narrow, labeled } from "./omp-chat-shared.js";
 
 const REFRESH_MS = 5 * 60 * 1000;
 const PROVIDER_NAMES = { anthropic: "Anthropic", openai: "OpenAI", "openai-codex": "Codex", "github-copilot": "Copilot", "google-antigravity": "Antigravity", google: "Google" };
 const WINDOW_NAMES = { "5h": "Session", "7d": "Week", weekly: "Week", daily: "Day", monthly: "Month" };
 const WINDOW_ORDER = ["5h", "daily", "7d", "weekly", "monthly"];
+// Windows WINDOW_ORDER doesn't know go last.
+const rank = (l) => {
+  const i = WINDOW_ORDER.indexOf(l.window?.id);
+  return i < 0 ? WINDOW_ORDER.length : i;
+};
 
 function until(ms) {
   const m = Math.max(0, Math.round((ms - Date.now()) / 60000));
@@ -32,14 +38,15 @@ function accounts(report) {
     if (!limits.some((l) => used(l) > 0)) continue;
     const shown = limits
       .filter((l) => used(l) > 0 || l.window?.id === "5h")
-      .sort((a, b) => WINDOW_ORDER.indexOf(a.window?.id) - WINDOW_ORDER.indexOf(b.window?.id));
+      .sort((a, b) => rank(a) - rank(b));
     const sameWindow = (l) => shown.filter((o) => o.window?.id === l.window?.id).length > 1;
+    const who = r.metadata?.email ?? r.metadata?.accountId ?? "";
     out.push({
-      key: `${r.provider}:${r.metadata?.email ?? r.metadata?.accountId ?? ""}`,
       name: PROVIDER_NAMES[r.provider] ?? r.provider,
-      who: r.metadata?.email ?? r.metadata?.accountId ?? "",
+      who,
       limits: shown.map((l) => ({
-        id: l.id,
+        // Limit ids name the provider, not the account.
+        id: `${r.provider}:${who}:${l.id}`,
         label: sameWindow(l) ? l.label : WINDOW_NAMES[l.window?.id] ?? l.window?.label ?? l.label,
         short: l.window?.id === "weekly" ? "7d" : l.window?.id === "monthly" ? "mo" : l.window?.id ?? String(l.label ?? "?").slice(0, 3),
         fraction: Math.min(1, Math.max(0, used(l))),
@@ -54,7 +61,6 @@ function accounts(report) {
 
 export class Stats {
   init(cx) {
-    this.alive = true;
     this.report = null;
     this.error = null;
     this.loading = false;
@@ -63,9 +69,7 @@ export class Stats {
     cx.timer.every(REFRESH_MS, (cx) => this.refresh(cx));
   }
 
-  close() {
-    this.alive = false;
-  }
+  close() {}
 
   refresh(cx) {
     if (this.loading) return;
@@ -88,16 +92,15 @@ export class Stats {
 
   render() {
     const t = theme();
-    const root = v_flex().id("omp-stats").size_full().min_h(0).text_size(12).text_color(t.foreground)
-      .on_size_change((size, cx) => { if (Math.round(size.width) !== this.width) { this.width = Math.round(size.width); cx.notify(); } });
+    const root = v_flex().id("omp-stats").size_full().min_h(0).text_size(12).text_color(t.foreground);
     const list = accounts(this.report);
     // Bars and numbers show what is left; the color still warns as use grows.
     const color = (f, status) => (status === "exhausted" || f >= 0.9 ? t.blocked : f >= 0.7 ? t.working : t.accent);
     const left = (f) => Math.round((1 - f) * 100);
-    // The rail (below 120px, as omp-chat's sidebar lists): every limit's window ("Session", or
-    // "5h" below 84px), what's left, and a thin bar.
-    if ((this.width ?? 300) < 120) {
-      const named = (this.width ?? 0) >= 84;
+    // The rail (as omp-chat's sidebar lists): every limit's window ("Session", or "5h" unlabeled),
+    // what's left, and a thin bar.
+    if (narrow()) {
+      const named = labeled();
       const limits = list.flatMap((a) => a.limits.map((l) => ({ ...l, who: a.name })));
       if (!limits.length) return root.items_center().justify_center().text_size(11).text_color(t.dim).child(this.report ? "–" : "…");
       return root.justify_end().px(named ? 9 : 6).pb(10).gap(8).text_size(named ? 11 : 10)
@@ -110,8 +113,8 @@ export class Stats {
     }
     const header = h_flex().px(16).h(41).pt(14).pb(5).flex_none().items_center().justify_between()
       .child(div().text_size(11.5).font_medium().text_color(t.dim).child("Usage"))
-      .child(h_flex().id("stats-refresh").gap(6).items_center().text_size(11).text_color(t.dim).cursor_pointer()
-        .hover((st) => st.text_color(t.foreground)).tooltip("Refresh provider usage")
+      .child(h_flex().id("stats-refresh").gap(6).items_center().text_size(11).text_color(this.error ? t.blocked : t.dim).cursor_pointer()
+        .hover((st) => st.text_color(t.foreground)).tooltip(this.error ? `omp usage: ${this.error}` : "Refresh provider usage")
         .on_click((_e, cx) => this.refresh(cx))
         .when(this.loading, (el) => el.child(svg("mods/workspace-chrome/spinner.svg").size(11).text_color(t.dim).spin(900)))
         .when(!this.loading && Boolean(this.at), (el) => el.child(new Date(this.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))));

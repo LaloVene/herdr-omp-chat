@@ -1,21 +1,26 @@
 // The panes' header in the omp-chat layout: Herdr's shipped `pane` header (program icon, name,
 // folder, agent status; split, zoom and close on hover), plus, on an omp pane and on a chat pane,
 // the chat / terminal / btw buttons. Props from the app: { pane, terminal }.
-import { div, svg, image } from "gpui-kit";
+import { div, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { panes, terminals, props, run, theme, home, nextCommand } from "herdr";
+import { panes, terminals, props, run, theme, nextCommand } from "herdr";
 import { loadStates, watchRoot, chatPanes } from "./channel.js";
-import { toChat, toTerminal, viewButtons } from "./view.js";
+import { toChat, toTerminal, BTW_BLOCK } from "./view.js";
+import { programIcon } from "./omp-chat-shared.js";
+import { folder } from "./common.js";
 
-function icon(p, size, color) {
-  if (!p?.icon) return null;
-  return p.tint ? svg(p.icon).size(size).flex_none().text_color(color) : image(p.icon).w(size).h(size).flex_none();
-}
-
-function folder(cwd) {
-  if (!cwd) return "";
-  const h = home();
-  return cwd === h ? "~" : cwd.startsWith(h + "/") ? "~" + cwd.slice(h.length) : cwd;
+/** Chat, terminal and btw as small icon buttons; `view` is the pane's mode. */
+function viewButtons(t, id, view, state, toggle) {
+  const button = (key, icon, on, color, action) => h_flex().id(`${key}-${id}`).h(22).px(6).flex_none().items_center().justify_center().rounded(5)
+    .cursor_pointer().when(on, (el) => el.bg(t.selected)).when(!on, (el) => el.hover((s) => s.bg(t.hover)))
+    .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+    .on_click((_e, cx) => { cx.stop_propagation(); action(cx); })
+    .child(svg(`mods/omp-chat/${icon}.svg`).size(14).text_color(color ?? (on ? t.foreground : t.muted)));
+  return h_flex().flex_none().gap(2).items_center()
+    .child(button("seg-chat", "chat", view === "chat", null, (cx) => view !== "chat" && toggle(cx)))
+    .child(button("seg-term", "terminal", view === "terminal", null, (cx) => view !== "terminal" && toggle(cx)))
+    .child(div().w(1).h(14).mx(2).bg(t.border))
+    .child(button("seg-btw", "btw", false, state?.btwRunning ? t.working : null, () => run("layout.toggle", { id: BTW_BLOCK })));
 }
 
 export class Header {
@@ -77,7 +82,7 @@ export class Header {
     const chat = omp?.view === "chat";
     const state = omp ? this.states[omp.terminal] : null;
     const name = chat ? "omp" : ((p.program?.agent || p.program?.shell) && p.program.name) || p.title || p.program?.name || "shell";
-    const pic = chat ? svg("mods/omp-chat/chat.svg").size(14).flex_none().text_color(t.dim) : icon(p.program, 14, t.dim);
+    const pic = chat ? svg("mods/omp-chat/chat.svg").size(14).flex_none().text_color(t.dim) : programIcon(p.program, 14, t.dim);
     // A chat pane's omp is parked: its status is Herdr's for that terminal, as in the terminal view.
     const st = chat ? (terminals().find((x) => x.address === omp.terminal)?.status ?? (state?.busy ? "working" : null)) : p.status;
     const pane = p.pane;

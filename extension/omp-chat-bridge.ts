@@ -70,7 +70,7 @@ export default function (pi) {
   let busy = false;
   let watcher: fs.FSWatcher | undefined;
   let scanTimer;
-  const calls = new Map<string, { toolName: string; input: unknown; intent?: string }>();
+  const calls = new Map<string, { input: unknown; intent?: string }>();
   const pending = new Map<string, Record<string, unknown>>();
   const topics = new Map();
   let btwRun: { id: string; abort: AbortController } | undefined;
@@ -86,7 +86,7 @@ export default function (pi) {
   // omp's version and a tip for the chat's empty state (loadWelcome).
   let welcome: { version: string; tip: string | null } | null = null;
 
-  /** Writes state.json; with `ifChanged`, only when something besides the time differs. */
+  /** Writes state.json; with `ifChanged`, only when something differs from the last write. */
   function writeState(ifChanged = false): void {
     if (!active) return;
     let sessionFile = null;
@@ -100,8 +100,6 @@ export default function (pi) {
     let thinking = null;
     try { thinking = pi.getThinkingLevel?.() ?? null; } catch {}
     const state = {
-      v: 1,
-      pid: process.pid,
       terminal: TERMINAL,
       sessionFile,
       sessionId: sessionId(),
@@ -117,7 +115,7 @@ export default function (pi) {
     const key = JSON.stringify(state);
     if (ifChanged && key === lastState) return;
     lastState = key;
-    writeJson(path.join(ROOT, "state.json"), { ...state, updatedAt: Date.now() });
+    writeJson(path.join(ROOT, "state.json"), state);
   }
 
   function writePending(): void {
@@ -162,7 +160,7 @@ export default function (pi) {
 
   function saveTopic(record): void {
     topics.set(record.id, record);
-    writeJson(path.join(ROOT, "btw", `${record.id}.json`), record);
+    if (active) writeJson(path.join(ROOT, "btw", `${record.id}.json`), record);
   }
 
   function btwHistory(previous, model) {
@@ -195,7 +193,11 @@ export default function (pi) {
       record = patchLatest(record, { status, error, updatedAt: Date.now() });
       saveTopic(record);
     };
-    if (followUpOf && !previous) return writeJson(path.join(ROOT, "btw", `${newId()}.json`), { ...record, status: "error", error: "That topic is gone." });
+    if (followUpOf && !previous) {
+      // Answered in the topic the user is looking at; only ids newId() makes may name a file.
+      if (/^[a-z0-9]+$/.test(followUpOf)) writeJson(path.join(ROOT, "btw", `${followUpOf}.json`), { ...record, id: followUpOf, status: "error", error: "That topic is gone." });
+      return;
+    }
     if (btwRun) return fail("error", "Another side question is still running.");
     const model = ctxRef?.model;
     if (!ctxRef?.runEphemeralTurn || !model) return fail("error", !model ? "No active model." : "This omp has no side turns.");
@@ -373,10 +375,11 @@ export default function (pi) {
       const id = String(args ?? "").trim();
       const entry = id ? ctx.sessionManager.getEntry(id) : undefined;
       if (entry?.type !== "message" || entry.message?.role !== "user") return;
-      await ctx.navigateTree(id, { summarize: false });
+      // Its session_tree event moves the reported leaf.
+      const { cancelled } = await ctx.navigateTree(id, { summarize: false });
+      if (cancelled) return;
       // The chat puts the message back in its own reply box; keep omp's editor empty for later sends.
       try { ctx.ui.setEditorText(""); } catch {}
-      if (active) moveLeaf(ctx);
     },
   });
 
@@ -396,7 +399,6 @@ export default function (pi) {
     cancelBtw();
     pending.clear();
     calls.clear();
-    topics.clear();
     treeLeaf = undefined;
     activate(ctx, true);
   });
@@ -424,7 +426,7 @@ export default function (pi) {
     clearTimeout(streamTimer);
     streamTimer = undefined;
     lastStreamWrite = Date.now();
-    writeJson(STREAM_FILE, { id: streamId, blocks: streamBlocks, done });
+    if (active) writeJson(STREAM_FILE, { id: streamId, blocks: streamBlocks, done });
   }
 
   pi.on("message_update", (event, ctx) => {
@@ -458,13 +460,13 @@ export default function (pi) {
 
   pi.on("tool_call", (event, ctx) => {
     if (!isMain(ctx) || !active || !event?.toolCallId) return;
-    calls.set(event.toolCallId, { toolName: event.toolName, input: event.input });
+    calls.set(event.toolCallId, { input: event.input });
   });
 
   pi.on("tool_execution_start", (event, ctx) => {
     if (!isMain(ctx) || !active || !event?.toolCallId) return;
     const known = calls.get(event.toolCallId);
-    calls.set(event.toolCallId, { toolName: event.toolName, input: known?.input ?? event.args, intent: event.intent });
+    calls.set(event.toolCallId, { input: known?.input ?? event.args, intent: event.intent });
     if (event.toolName === "ask") {
       const questions = Array.isArray(event.args?.questions) ? event.args.questions : [];
       pending.set(event.toolCallId, {
@@ -501,6 +503,7 @@ export default function (pi) {
     if (!isMain(ctx) || !active) return;
     active = false;
     cancelBtw();
+    clearTimeout(streamTimer);
     stopWatching();
     try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch {}
     try { fs.rmSync(STREAM_FILE, { force: true }); } catch {}

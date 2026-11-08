@@ -4,14 +4,14 @@
 // (key sequences after Ovis's server/dialogs/omp.ts, MIT, see NOTICE.md).
 import { screen, keys, send } from "./channel.js";
 
-export class ScreenChanged extends Error {
-  constructor(message = "It changed on screen") {
-    super(message);
+class ScreenChanged extends Error {
+  constructor() {
+    super("It changed on screen");
   }
 }
 
 const strip = (line) => line.replace(/^\s*│/, "").replace(/│\s*$/, "");
-const wait = (cx, ms) => new Promise((resolve) => cx.timer.after(ms, () => resolve()));
+export const wait = (cx, ms) => new Promise((resolve) => cx.timer.after(ms, () => resolve()));
 
 /** Rows drawn as `<cursor> <label>` (approval) or `<cursor> <glyph> <label>` (ask), from `from` until a rule. */
 function rows(lines, from, withGlyph) {
@@ -20,13 +20,18 @@ function rows(lines, from, withGlyph) {
   for (let i = from; i < lines.length; i++) {
     if (/^\s*[├╰]/.test(lines[i])) break;
     const m = re.exec(strip(lines[i]));
-    if (m) out.push({ cursor: m[1] !== " ", label: (withGlyph ? m[3] : m[2]).trim(), line: i });
+    if (m) out.push({ cursor: m[1] !== " ", label: (withGlyph ? m[3] : m[2]).trim() });
   }
   return out;
 }
 
 const moves = (from, to) => Array(Math.abs(to - from)).fill(to > from ? "down" : "up");
 const fingerprint = (text) => String(text ?? "").replace(/\s+/g, " ").trim().slice(0, 24);
+const joined = (lines) => lines.map(strip).join(" ").replace(/\s+/g, " ");
+// Input fields omp's approval details show (bash, write/edit, lsp, debug, eval/ida, task); a hashline
+// edit shows its first `[PATH#TAG]` header's path. Only the value's first line is matched: the compact
+// dialog shows just that line.
+const SHOWN = ["command", "path", "file_path", "file", "program", "code", "task"];
 
 // omp ignores keys for a moment after it draws a dialog (a guard against typing into it by accident).
 const SETTLE_MS = 1000;
@@ -38,9 +43,9 @@ export async function answerApproval(terminal, card, choice, steer, cx) {
   const lines = await screen(terminal, 80);
   const top = lines.findLastIndex((l) => l.includes(`Allow tool: ${card.toolName}`));
   if (top < 0) throw new ScreenChanged();
-  const shown = lines.slice(top).join(" ").replace(/\s+/g, " ");
-  const command = typeof card.input?.command === "string" ? fingerprint(card.input.command) : "";
-  if (command && !shown.includes(command)) throw new ScreenChanged();
+  const value = SHOWN.map((k) => card.input?.[k]).find((v) => typeof v === "string" && v.trim())
+    ?? /^\[([^\]#]+)#/m.exec(String(card.input?.input ?? ""))?.[1];
+  if (!value || !joined(lines.slice(top)).includes(fingerprint(value.trim().split("\n")[0]))) throw new ScreenChanged();
   if (steer) return send(terminal, steer, true);
   const menu = rows(lines, top + 1, false).filter((r) => /^(Approve|Deny)\b/.test(r.label));
   const cursor = menu.findIndex((r) => r.cursor);
@@ -50,15 +55,14 @@ export async function answerApproval(terminal, card, choice, steer, cx) {
   await keys(terminal, [...moves(cursor, target), "enter"]);
 }
 
-/** The ask dialog's current question and its option rows, or null when it isn't on screen. */
+/** The ask dialog's option rows for `question`, or null when it isn't on screen. */
 function askScreen(lines, question) {
   const top = lines.findLastIndex((l) => /^\s*╭─ Ask\b/.test(l));
   if (top < 0) return null;
   const divider = lines.findIndex((l, i) => i > top && /^\s*├/.test(l));
   if (divider < 0) return null;
-  const header = lines.slice(top + 1, divider).join(" ").replace(/\s+/g, " ");
-  if (question && !header.includes(fingerprint(question))) return null;
-  return { header, options: rows(lines, divider + 1, true) };
+  if (question && !joined(lines.slice(top + 1, divider)).includes(fingerprint(question))) return null;
+  return rows(lines, divider + 1, true);
 }
 
 /**
@@ -71,10 +75,10 @@ export async function answerAsk(terminal, card, answers, cx) {
   for (let i = 0; i < questions.length; i++) {
     const q = questions[i];
     const a = answers[i] ?? { picked: [], other: null };
-    const shown = askScreen(await screen(terminal, 80), q.question);
-    if (!shown) throw new ScreenChanged();
-    const options = shown.options;
-    const cursor = Math.max(0, options.findIndex((o) => o.cursor));
+    const options = askScreen(await screen(terminal, 80), q.question);
+    if (!options) throw new ScreenChanged();
+    const cursor = options.findIndex((o) => o.cursor);
+    if (cursor < 0) throw new ScreenChanged();
     const otherRow = options.findIndex((o) => /^Other \(type your own\)$/i.test(o.label));
     if (a.other && a.other.trim()) {
       if (otherRow < 0) throw new ScreenChanged();

@@ -1,10 +1,10 @@
 // The files the omp-chat-bridge extension keeps per terminal, and how this mod reaches them.
-import { appHome, panes, focused, readTextFile, writeTextFile, watchFolder, hc, shared, setShared } from "herdr";
+import { appHome, panes, readTextFile, writeTextFile, watchFolder, hc, shared, setShared } from "herdr";
 import * as fs from "fs/promises";
+import { PANES_KEY } from "./omp-chat-shared.js";
 
 export const ROOT = `${appHome()}/data/omp-chat`;
 export const dirOf = (terminal) => `${ROOT}/${terminal}`;
-const PANES_KEY = "omp-chat.panes";
 
 export async function readJson(path) {
   try {
@@ -49,7 +49,7 @@ export function watchRoot(cx, alive, onChange) {
   });
 }
 
-/** Chat pane id → its omp terminal (`shared("omp-chat.panes")`), for chat panes that still exist. */
+/** Chat pane id → its omp terminal (`shared(PANES_KEY)`), for chat panes that still exist. */
 export function chatPanes() {
   const live = new Set(panes().map((p) => p.pane));
   return Object.fromEntries(Object.entries(shared(PANES_KEY) ?? {}).filter(([pane]) => live.has(pane)));
@@ -59,17 +59,26 @@ export function setChatPanes(map) {
   setShared(PANES_KEY, map);
 }
 
-/** A pane's omp: its own terminal running the bridge, or the terminal a chat pane stands for. */
-export function ompOfPane(p, states) {
-  if (p.terminal) return states[p.terminal] && !p.program?.shell ? p.terminal : null;
-  return chatPanes()[p.pane] ?? null;
+/** Drops `pane`'s entry if it still stands for `terminal` (even once the pane is gone); whether it did. */
+export function forgetChatPane(pane, terminal) {
+  const map = { ...(shared(PANES_KEY) ?? {}) };
+  if (map[pane] !== terminal) return false;
+  delete map[pane];
+  setChatPanes(map);
+  return true;
 }
 
-/** The omp a tab shows: its focused pane's, else its first pane's. */
+/** The omp a tab shows: its focused pane's, else its first pane's. A pane's omp is its own terminal running the bridge, or the one a chat pane stands for. */
 export function ompTerminalOf(tab, states) {
-  const mine = panes().filter((p) => p.tab === tab);
-  const pick = mine.find((p) => p.focused && ompOfPane(p, states)) ?? mine.find((p) => ompOfPane(p, states));
-  return pick ? ompOfPane(pick, states) : null;
+  const chat = shared(PANES_KEY) ?? {};
+  let first = null;
+  for (const p of panes()) {
+    if (p.tab !== tab) continue;
+    const omp = p.terminal ? (states[p.terminal] && !p.program?.shell ? p.terminal : null) : (chat[p.pane] ?? null);
+    if (omp && p.focused) return omp;
+    first ??= omp;
+  }
+  return first;
 }
 
 export async function sendRequest(terminal, request) {
@@ -77,20 +86,23 @@ export async function sendRequest(terminal, request) {
   await writeTextFile(`${dirOf(terminal)}/requests/${id}.json`, JSON.stringify(request), null);
 }
 
+/** Runs `hc`, throwing its error output on failure. */
+async function hcOk(args) {
+  const r = await hc(args);
+  if (r.code !== 0) throw new Error(r.stderr.trim() || r.stdout.trim() || `hc ${args[0]} failed`);
+  return r;
+}
+
 /** The terminal's screen as plain lines. */
 export async function screen(terminal, lines = 60) {
-  const r = await hc(["read", terminal, "--lines", String(lines)]);
-  if (r.code !== 0) throw new Error(r.stderr.trim() || "hc read failed");
-  return r.stdout.split("\n");
+  return (await hcOk(["read", terminal, "--lines", String(lines)])).stdout.split("\n");
 }
 
 export async function keys(terminal, list) {
-  const r = await hc(["keys", terminal, ...list]);
-  if (r.code !== 0) throw new Error(r.stderr.trim() || "hc keys failed");
+  await hcOk(["keys", terminal, ...list]);
 }
 
 /** Pastes text and presses Enter. `force`: even while omp shows a dialog. */
 export async function send(terminal, text, force = false) {
-  const r = await hc(["send", ...(force ? ["--force"] : []), terminal, text]);
-  if (r.code !== 0) throw new Error(r.stderr.trim() || r.stdout.trim() || "hc send failed");
+  await hcOk(["send", ...(force ? ["--force"] : []), terminal, text]);
 }

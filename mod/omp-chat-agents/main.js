@@ -1,25 +1,10 @@
 // Agents in grouped or priority views; parents take their most urgent sub-agent's place.
 // A viewed done agent stays in Done until left.
 
-import { View, div, image, svg } from "gpui-kit";
+import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, layout, appHome, readTextFile, exec } from "herdr";
-
-function find(node, id) {
-  if (node?.id === id) return node;
-  for (const child of node?.children ?? []) {
-    const found = find(child, id);
-    if (found) return found;
-  }
-  return null;
-}
-
-// The sidebar's rail goes by its width, not a flag: dragging its edge narrows it too. omp-chat
-// keeps the full lists down to 120px (Herdr's own mods switch at 160).
-const sidebarWidth = () => find(layout(), "sidebar")?.size?.px ?? Infinity;
-const narrow = () => sidebarWidth() < 120;
-// Between the bare rail and the full list: rail rows with their names.
-const labeled = () => sidebarWidth() >= 84;
+import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, appHome, readTextFile, exec } from "herdr";
+import { narrow, labeled, spaceColor, programIcon, SESSION_ICON, chatPaneOmps } from "./omp-chat-shared.js";
 
 const clean = (s) => (s ?? "").replace(/^[^\p{L}\p{N}]+/u, "").trim();
 
@@ -63,49 +48,29 @@ function duration(ms) {
   return h < 24 ? `${h}h` : `${Math.floor(h / 24)}d`;
 }
 
-// The agent's icon from the app's program table: a one-color glyph or a picture.
-function icon(p, size, color) {
-  if (!p?.icon) return null;
-  return p.tint ? svg(p.icon).size(size).flex_none().text_color(color) : image(p.icon).w(size).h(size).flex_none();
-}
-
-// What a stored space color name looks like on an avatar (the same in every mod that draws space
-// avatars); an idle agent wears its space's.
-const MARK = { ansi6: "#22a99a", ansi3: "#e3814f", ansi4: "#5b8def", ansi5: "#8b7cf6", ansi2: "#3fae6a", ansi1: "#d9649a" };
-
 /**
  * Adds the omps shown as chat panes: omp-chat parks their terminals, which drops them from
  * agents(). Each stands where its chat pane is, and focusing it focuses that pane.
  */
-function withChatPanes(list, all) {
-  const map = shared("omp-chat.panes") ?? {};
-  if (!Object.keys(map).length) return list;
+function withChatPanes(list) {
+  const omps = chatPaneOmps();
+  if (!omps.length) return list;
   const listed = new Set(list.map((a) => a.address));
-  const order = spaces().flatMap((s) => s.tabs.map((tab, i) => ({ s, tab, i })));
-  const extra = [];
-  for (const p of panes()) {
-    const address = map[p.pane];
-    const term = address && !p.terminal && !listed.has(address) ? all.find((x) => x.address === address) : null;
-    const at = term ? order.find((o) => o.tab.id === p.tab) : null;
-    if (!at) continue;
-    const raw = term.status === "error" ? "blocked" : term.status;
-    extra.push({
-      address, pane: p.pane, space: at.s.id, space_name: at.s.name, tab: p.tab, tab_index: at.i, tab_name: at.tab.name,
-      // Herdr never sees a parked terminal: its "done" counts as seen once its chat pane showed that turn.
-      status: raw === "done" && (p.focused || (shared("omp-chat.seen") ?? {})[address] === term.turn) ? "idle" : (raw ?? "idle"),
-      app: term.report?.app ?? null, program: term.program, title: term.title ?? p.title ?? "",
+  const order = spaces().flatMap((s) => s.tabs.map((tab) => ({ s, tab })));
+  const extra = omps.flatMap(({ pane: p, term, status }) => {
+    const at = !listed.has(term.address) && order.find((o) => o.tab.id === p.tab);
+    return at ? [{
+      address: term.address, pane: p.pane, space: at.s.id, space_name: at.s.name, tab: p.tab, status,
+      program: term.program, title: term.title ?? p.title ?? "",
       // terminals() has no `pinned`: terminal.pin keeps it as the `herdr.pinned` label.
       seq: 0, pinned: Boolean(term.labels?.["herdr.pinned"]), focused: Boolean(p.focused),
-    });
-  }
+    }] : [];
+  });
   if (!extra.length) return list;
   // agents() comes in space, tab, pane order: keep it, with each chat pane in its tab's place.
   const rank = (a) => order.findIndex((o) => o.tab.id === a.tab);
   return [...list, ...extra].map((a, n) => [a, n]).sort(([x, n], [y, m]) => rank(x) - rank(y) || n - m).map(([a]) => a);
 }
-
-// omp titles start with an emoji or Nerd Font glyph, which /resume draws as the session's icon.
-const SESSION_ICON = /^(?:\p{Extended_Pictographic}|[\u2190-\u2BFF\uE000-\uF8FF]|[\u{F0000}-\u{10FFFD}])\uFE0F?/u;
 
 /**
  * Each omp's session icon, by terminal: omp-chat's bridge names the session file, whose first
@@ -134,13 +99,10 @@ export default class Agents extends View {
     this.folded = new Set();
     // Each agent's last state and when it changed (ms), kept across restarts.
     this.changed = JSON.parse(localStorage.getItem("changed") ?? "{}");
-    this.pendingPins = JSON.parse(localStorage.getItem("pins") ?? "[]");
-    if (!this.pendingPins.length) localStorage.removeItem("pins");
-    this.migratingPins = new Set();
     cx.timer.every(30000, (cx) => cx.notify());
     this.icons = new Map();
     const refresh = (cx) => cx.spawn(async (cx) => {
-      const next = await sessionIcons(withChatPanes(agents(), terminals()).map((a) => a.address).filter((a) => !a.includes("/")));
+      const next = await sessionIcons(withChatPanes(agents()).map((a) => a.address).filter((a) => !a.includes("/")));
       if ([...next].join() === [...this.icons].join()) return;
       this.icons = next;
       cx.notify();
@@ -164,26 +126,6 @@ export default class Agents extends View {
     const listed = new Set(list.map((a) => a.address));
     for (const [k, c] of Object.entries(this.changed)) if (!listed.has(k) && now - c.at > 30 * 86400000) delete this.changed[k];
     localStorage.setItem("changed", JSON.stringify(this.changed));
-  }
-
-  // Keep offline pins until their terminal returns, and keep each pending until
-  // core echoes the label so a failed write doesn't erase the old pin.
-  migratePins(all) {
-    const listed = new Map(all.filter((t) => t.state === "live").map((t) => [t.address, t]));
-    const pending = this.pendingPins.filter((address) => {
-      const terminal = listed.get(address);
-      if (!terminal) return true;
-      if (terminal.labels?.["herdr.pinned"]) return false;
-      if (!this.migratingPins.has(address)) {
-        this.migratingPins.add(address);
-        run("terminal.pin", { terminal: address, pinned: true });
-      }
-      return true;
-    });
-    if (pending.length === this.pendingPins.length) return;
-    this.pendingPins = pending;
-    if (pending.length) localStorage.setItem("pins", JSON.stringify(pending));
-    else localStorage.removeItem("pins");
   }
 
   since(a) {
@@ -230,10 +172,6 @@ export default class Agents extends View {
         .when(s.id === on, (el) => el.child(svg("mods/workspace-chrome/check.svg").size(14).flex_none().text_color(t.foreground)))));
   }
 
-  peek(addr) {
-    run("terminal.peek", { terminal: addr });
-  }
-
   // Live sub-agents of `addr`, depth first, each with the tree lines in front of it.
   tree(all, addr, lead = []) {
     const kids = all.filter((k) => k.parent === addr && k.state === "live");
@@ -249,7 +187,7 @@ export default class Agents extends View {
   subRow(t, s, shown, compact) {
     const k = s.t;
     const st = kidStatus(k, this.listed);
-    const pic = icon(k.program, 14, t.foreground);
+    const pic = programIcon(k.program, 14, t.foreground);
     const on = k.address === shown;
     return h_flex()
       .id(`sub-${k.address}`)
@@ -263,7 +201,7 @@ export default class Agents extends View {
       .text_size(12.5)
       .when(on, (el) => el.bg(t.raised))
       .hover((s) => s.bg(t.hover))
-      .on_click(() => this.peek(k.address))
+      .on_click(() => run("terminal.peek", { terminal: k.address }))
       .children(s.lines.map(l => div().self_start().mt(-4).w(9).h(17).mr(4).flex_none()
         .when(Boolean(l), el => el.border_l(1.5).border_color(t.input))
         .when(l === "└" || l === "├", el => el.border_b(1.5).rounded_bl(6))))
@@ -289,9 +227,8 @@ export default class Agents extends View {
     const collapsed = narrow();
     const sort = sortOf();
     const all = terminals();
-    let list = withChatPanes(agents(), all);
+    let list = withChatPanes(agents());
     this.listed = new Map(list.map((a) => [a.address, a.status]));
-    this.migratePins(all);
     const shown = focused()?.agent;
     const now = Date.now();
     this.track(list, now);
@@ -312,6 +249,13 @@ export default class Agents extends View {
       return [r, ...subs.map((s) => this.subRow(t, s, shown, byPriority))];
     };
 
+    // Folds an agent's sub-agents or a group, by its key.
+    const toggleFold = (key) => (_e, cx) => {
+      cx.stop_propagation();
+      this.folded.has(key) ? this.folded.delete(key) : this.folded.add(key);
+      cx.notify();
+    };
+
     // The fold chevron; folded, the count too, colored by the most urgent one.
     const fold = (a, subs) => {
       const sts = subs.map((s) => kidStatus(s.t, this.listed));
@@ -329,11 +273,7 @@ export default class Agents extends View {
         .text_color(open ? t.dim : (t[top] ?? t.dim))
         .cursor_pointer()
         .hover((s) => s.bg(t.hover).text_color(t.foreground))
-        .on_click((_e, cx) => {
-          cx.stop_propagation();
-          open ? this.folded.add(a.address) : this.folded.delete(a.address);
-          cx.notify();
-        })
+        .on_click(toggleFold(a.address))
         .child(svg(`mods/workspace-chrome/chevron-${open ? "down" : "right"}.svg`).size(11).flex_none())
         .when(!open, (el) => el.child(String(subs.length)));
     };
@@ -358,12 +298,11 @@ export default class Agents extends View {
       // with a slowly breathing glow behind it while it works, the done color with a still glow
       // when it finished unseen, red when it needs you, otherwise its space's own color, so a
       // space's idle agents share one. A picture icon can't take a color, so it keeps the status mark.
-      const own = (shared("space.colors") ?? {})[a.space] ?? "ansi6";
-      const tint = a.status === "working" || a.status === "blocked" || a.status === "done" ? (t[a.status] ?? t.dim) : (own.startsWith("#") ? own : MARK[own] ?? t[own] ?? t.foreground);
+      const tint = a.status === "working" || a.status === "blocked" || a.status === "done" ? (t[a.status] ?? t.dim) : spaceColor(t, a.space);
       const session = this.icons?.get(a.address);
       const glyph = session
         ? h_flex().size(16).flex_none().items_center().justify_center().text_size(14).text_color(tint).child(session)
-        : icon(a.program, 16, tint) ?? div().size(16).flex_none().rounded(4).bg(tint);
+        : programIcon(a.program, 16, tint) ?? div().size(16).flex_none().rounded(4).bg(tint);
       const glow = a.status === "working" || a.status === "done";
       const pic = !glow ? glyph : div().relative().size(16).flex_none()
         // The same box as a space badge's glow (28px, radius 10), centred on the 16px icon.
@@ -436,11 +375,7 @@ export default class Agents extends View {
         })
         .on_click(() => run("pane.focus", { pane: a.pane }))
         .child(div().id(`agent-fold-${a.address}`)
-          .when(subs.length > 0, el => el.on_click((_e, cx) => {
-            cx.stop_propagation();
-            this.folded.has(a.address) ? this.folded.delete(a.address) : this.folded.add(a.address);
-            cx.notify();
-          })).child(pic))
+          .when(subs.length > 0, el => el.on_click(toggleFold(a.address))).child(pic))
         .child(h_flex().flex_1().min_w(0).gap(5).items_center()
           .child(div().min_w(0).max_w(full && more ? 120 : 200).truncate().text_color(idle ? t.muted : t.foreground).child(name))
           .when(full && Boolean(more), el => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(`\u00b7 ${more}`))))
@@ -464,7 +399,7 @@ export default class Agents extends View {
     // A group's header; it folds the group. Folded, it says how many and the most urgent state.
     const header = (g) => {
       const open = !this.folded.has(g.id);
-      const top = g.members.reduce((m, a) => ((RANK[a.status] ?? 0) > (RANK[m] ?? 0) ? a.status : m), null);
+      const top = Object.keys(RANK).find((s) => RANK[s] === Math.max(...g.members.map(rankOf)));
       return h_flex()
         .id(g.id)
         .px(8)
@@ -477,10 +412,7 @@ export default class Agents extends View {
         .font_medium()
         .cursor_pointer()
         .hover((s) => s.text_color(t.foreground))
-        .on_click((_e, cx) => {
-          open ? this.folded.add(g.id) : this.folded.delete(g.id);
-          cx.notify();
-        })
+        .on_click(toggleFold(g.id))
         .child(div().truncate().text_color(t[g.status] ?? t.dim).child(g.label))
         .when(byPriority || !open, (el) => el.child(div().text_color(t.dim).child(String(g.members.length))))
         .child(div().flex_1())

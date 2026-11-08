@@ -77,8 +77,12 @@ copy_files() {
   run mkdir -p "$MOD" "$APP/layouts" "$EXT_DIR"
   # Files an earlier version shipped must not linger (the marker is hidden, so it stays).
   [ "$mode" = update ] && run find "$MOD" -mindepth 1 -maxdepth 1 ! -name '.*' -exec rm -rf {} +
-  for f in "$HERE"/mod/omp-chat/* "$HERE/NOTICE.md"; do run cp "$f" "$MOD/"; done
-  for m in "${RAILS[@]}"; do run rm -rf "$APP/mods/$m"; run cp -R "$HERE/mod/$m" "$APP/mods/$m"; done
+  # The mods link omp-chat-shared.js from mod/shared (Herdr won't import across mods): copy the file itself.
+  for f in "$HERE"/mod/omp-chat/* "$HERE/NOTICE.md"; do
+    case "${f##*/}" in gpui-kit.d.ts | jsconfig.json) continue ;; esac
+    run cp -L "$f" "$MOD/"
+  done
+  for m in "${RAILS[@]}"; do run rm -rf "$APP/mods/$m"; run cp -RL "$HERE/mod/$m" "$APP/mods/$m"; done
   run cp "$HERE/layouts/omp-chat.json" "$LAYOUT"
   run cp "$HERE/layouts/omp-chat.svg" "$PREVIEW"
   [ "$dry" = 1 ] && echo "would: write $MARKER" || date -u +%FT%TZ > "$MARKER"
@@ -95,9 +99,9 @@ case "$mode" in
     [ -e "$LAYOUT" ] && die "$LAYOUT exists"
     [ -e "$PREVIEW" ] && die "$PREVIEW exists"
     [ -e "$LINK" ] || [ -L "$LINK" ] && die "$LINK exists"
+    run mkdir -p "$APP"
     keys add
     copy_files
-    command -v herdr-app >/dev/null && for m in "$MOD" "${RAILS[@]/#/$APP/mods/}"; do run herdr-app check "$m"; done
     echo "Installed. Restart omp sessions to load the bridge; switch layout with: herdr-app do layout.switch --name omp-chat"
     ;;
   update)
@@ -105,7 +109,6 @@ case "$mode" in
     if [ -e "$LINK" ] || [ -L "$LINK" ]; then ours_link || die "$LINK is not this repo's link"; fi
     keys add
     copy_files
-    command -v herdr-app >/dev/null && for m in "$MOD" "${RAILS[@]/#/$APP/mods/}"; do run herdr-app check "$m"; done
     ;;
   uninstall)
     [ -f "$MARKER" ] || die "no copy installed by this script at $MOD"
@@ -119,15 +122,19 @@ case "$mode" in
         run herdr-app do pane.close "{\"pane\":\"$pane\"}" >/dev/null || true
       done
     fi
-    if command -v herdr-app >/dev/null && herdr-app status 2>/dev/null | grep -q '"layout": "omp-chat"'; then
-      run herdr-app do layout.switch --name main
+    if command -v herdr-app >/dev/null; then
+      status=$(herdr-app status 2>/dev/null || true)
+      if [[ $status == *'"layout": "omp-chat"'* ]]; then run herdr-app do layout.switch --name main; fi
     fi
     run rm -rf "$MOD" "${RAILS[@]/#/$APP/mods/}"
     run rm -f "$LAYOUT" "$PREVIEW"
     run rm -f "$APP/layouts/.state/omp-chat.json"
     ours_link && run rm -f "$LINK"
-    run rm -rf "$APP/data/omp-chat" "$APP/data/omp-chat-render"
+    run rm -rf "$APP/data/omp-chat" "$APP/data/omp-chat-render" "$APP/data/omp-chat-stream"
     keys remove
     echo "Uninstalled. Running omp sessions keep the bridge until they restart."
     ;;
 esac
+if [ "$mode" != uninstall ] && command -v herdr-app >/dev/null; then
+  for m in "$MOD" "${RAILS[@]/#/$APP/mods/}"; do run herdr-app check "$m"; done
+fi

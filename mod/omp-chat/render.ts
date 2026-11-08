@@ -6,13 +6,13 @@
 // display blocks). Drawing uses omp's own modules from the plugin install (~/.omp/plugins);
 // without them an answer is plain markdown, still split into blocks.
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { blocks } from "./blocks.js";
+import { blocks, closesFence, fenceOpen } from "./blocks.js";
 
 export type Part = ({ t: "md"; text: string } | { t: "pre"; text: string } | { t: "img"; path: string; w: number; h: number }) & { copy?: string };
-type Segment = { kind: "md"; text: string } | { kind: "mermaid" | "svg" | "math"; source: string; raw: string; copy: string };
+type Segment = { kind: "md"; text: string } | { kind: "mermaid"; source: string; raw: string; copy: string } | { kind: "svg" | "math"; source: string; copy: string };
 
 const PI = process.env.OMP_CHAT_PI_ROOT ?? join(homedir(), ".omp/plugins/node_modules/@oh-my-pi");
 const FENCE = /^ {0,3}(?:`{3,}|~{3,})/m;
@@ -34,6 +34,7 @@ type Omp = {
   renderMermaidAscii: (text: string, options?: Record<string, unknown>) => string;
   prepareSvg: (svg: string, palette: Record<string, string>) => string;
   splitTableCharts: (markdown: string, streaming: boolean) => ({ kind: "markdown"; text: string } | { kind: "chart"; table: unknown })[];
+  hasChartTable: (markdown: string) => boolean;
   lookupTableChart: (table: unknown) => string | null | Promise<void>;
   latexToUnicode: (src: string) => string;
   latexToBlock: (src: string) => string[];
@@ -55,7 +56,7 @@ async function loadOmp(): Promise<Omp | null> {
     const delimiters = await import(join(PI, "pi-utils/src/math-delimiters.ts"));
     charts.setTableCharts("always");
     omp = {
-      renderMermaidAscii: natives.renderMermaidAscii, prepareSvg: svg.prepareSvg, splitTableCharts: charts.splitTableCharts, lookupTableChart: charts.lookupTableChart,
+      renderMermaidAscii: natives.renderMermaidAscii, prepareSvg: svg.prepareSvg, splitTableCharts: charts.splitTableCharts, hasChartTable: charts.hasChartTable, lookupTableChart: charts.lookupTableChart,
       latexToUnicode: unicode.latexToUnicode, latexToBlock: block.latexToBlock, mathSpanAt: delimiters.mathSpanAt, mathBlockAt: delimiters.mathBlockAt,
     };
   } catch {
@@ -76,20 +77,20 @@ function splitFences(markdown: string): Segment[] {
   for (const line of markdown.split("\n")) {
     if (fence) {
       fence.raw.push(line);
-      const close = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line);
-      if (close && close[1]![0] === fence.marker[0] && close[1]!.length >= fence.marker.length) {
+      if (closesFence(line, fence.marker)) {
+        const body = fence.body.join("\n");
         if (fence.lang) {
           flush();
-          out.push({ kind: fence.lang, source: fence.body.join("\n"), raw: fence.raw.join("\n"), copy: fence.body.join("\n") });
+          out.push(fence.lang === "mermaid" ? { kind: "mermaid", source: body, raw: fence.raw.join("\n"), copy: body } : { kind: "svg", source: body, copy: body });
         } else prose.push(...fence.raw);
         fence = null;
       } else fence.body.push(line);
       continue;
     }
-    const open = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
-    if (open && !(open[1]![0] === "`" && open[2]!.includes("`"))) {
-      const lang = open[2]!.trim().split(/[ \t]/, 1)[0]!.toLowerCase();
-      fence = { marker: open[1]!, lang: lang === "mermaid" || lang === "svg" ? lang : null, body: [], raw: [line] };
+    const open = fenceOpen(line);
+    if (open) {
+      const lang = open.info.trim().split(/[ \t]/, 1)[0]!.toLowerCase();
+      fence = { marker: open.marker, lang: lang === "mermaid" || lang === "svg" ? lang : null, body: [], raw: [line] };
       continue;
     }
     prose.push(line);
@@ -138,25 +139,23 @@ function mathParts(prose: string, o: Omp): Segment[] {
     const next = prose.indexOf("\n", at);
     const lineEnd = next === -1 ? prose.length : next + 1;
     const line = prose.slice(at, lineEnd);
-    const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
-    if (fence) {
-      if (marker && marker[0] === fence[0] && marker.length >= fence.length && !line.slice(line.indexOf(marker) + marker.length).trim()) fence = null;
-    } else if (marker) {
-      fence = marker;
+    const bare = prose.slice(at, next === -1 ? prose.length : next);
+    const open = fence ? null : fenceOpen(bare);
+    if (fence || open) {
+      // Code goes through as written: a fenced block is never math.
+      flush();
+      out.push({ kind: "md", text: line });
+      fence = open ? open.marker : closesFence(bare, fence!) ? null : fence;
     } else {
       const block = o.mathBlockAt(prose.slice(at));
       if (block) {
         flush();
-        out.push({ kind: "math", source: o.latexToBlock(block.body).join("\n"), raw: block.raw, copy: block.body.trim() });
+        out.push({ kind: "math", source: o.latexToBlock(block.body).join("\n"), copy: block.body.trim() });
         at += block.raw.length;
         continue;
       }
+      chunk += line;
     }
-    // Code goes through as written: a fenced block is never math.
-    if (fence || marker) {
-      flush();
-      out.push({ kind: "md", text: line });
-    } else chunk += line;
     at = lineEnd;
   }
   flush();
@@ -177,9 +176,13 @@ function svgFile(svg: string, appHome: string): Part {
   const file = join(dir, name);
   if (!existsSync(file)) {
     mkdirSync(dir, { recursive: true });
-    writeFileSync(file, svg);
-    const files = readdirSync(dir).map((f) => ({ f, at: statSync(join(dir, f)).mtimeMs })).sort((a, b) => a.at - b.at);
-    for (const old of files.slice(0, Math.max(0, files.length - KEEP_FILES))) unlinkSync(join(dir, old.f));
+    // Other chat panes' helpers share the folder: write whole files only, and expect theirs to come and go.
+    const temp = `${file}.${process.pid}.tmp`;
+    writeFileSync(temp, svg);
+    renameSync(temp, file);
+    const files = readdirSync(dir).filter((f) => f.endsWith(".svg"))
+      .map((f) => ({ f, at: statSync(join(dir, f), { throwIfNoEntry: false })?.mtimeMs ?? 0 })).sort((a, b) => a.at - b.at);
+    for (const old of files.slice(0, Math.max(0, files.length - KEEP_FILES))) rmSync(join(dir, old.f), { force: true });
   }
   const box = /viewBox\s*=\s*["']\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)/i.exec(svg);
   const width = box ? Number(box[1]) : Number(/\swidth\s*=\s*["']?([\d.]+)/i.exec(svg)?.[1] ?? 600);
@@ -207,7 +210,7 @@ export async function answerParts(markdown: string, palette: Record<string, stri
       parts.push({ t: "pre", text: segment.source, copy: segment.copy });
     } else if (segment.kind === "svg") {
       parts.push({ ...svgFile(o!.prepareSvg(segment.source, palette), appHome), copy: segment.copy });
-    } else if (!o || !TABLE_ROW.test(segment.text)) {
+    } else if (!o || !o.hasChartTable(segment.text)) {
       parts.push(...blocks(segment.text));
     } else {
       for (const piece of o.splitTableCharts(segment.text, false)) {

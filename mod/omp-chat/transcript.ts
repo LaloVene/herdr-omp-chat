@@ -1,13 +1,14 @@
 #!/usr/bin/env bun
 // Reads an omp session JSONL and prints the shown branch as chat items (JSON on stdout).
-// Usage: bun transcript.ts <session.jsonl> [--limit N] [--before K] [--leaf ID|none --after ID]
+// Usage: bun transcript.ts <session.jsonl> [--limit N] [--leaf ID|none --after ID]
 //                          [--palette JSON --app-home DIR]
 //        bun transcript.ts --sessions <session dir>      (the sessions /resume would offer)
-// Items are numbered over the whole branch; the output holds [max(0, end - limit), end), where
-// end = before ?? total. Record rules follow Ovis's createOmpTranscriptParser (MIT, see NOTICE.md),
+// Items are numbered over the whole branch; the output holds the last `limit` (all without
+// --limit). Record rules follow Ovis's createOmpTranscriptParser (MIT, see NOTICE.md),
 // plus following parentId from the leaf so a /tree branch shows only that branch.
 // Prints only what the chat renders: tool input/output are cut, images become placeholders.
-// With --palette, answers holding mermaid, svg or chartable tables also get `parts` (render.ts).
+// With --palette, answers holding mermaid, svg or chartable tables also get `parts` (render.ts);
+// one whose drawing fails stays plain markdown.
 
 import { closeSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
 import { homedir } from "node:os";
@@ -17,11 +18,10 @@ import { answerParts, hasParts, type Part } from "./render.ts";
 
 type Row = Record<string, unknown>;
 type Item =
-  | { k: "user"; id: string; text: string; ts: string | null; steer?: boolean }
+  | { k: "user"; id: string; text: string; steer?: boolean }
   | { k: "text"; id: string; text: string; parts?: Part[] }
-  | { k: "thinking"; id: string; text: string }
   | { k: "tool"; id: string; name: string; summary: string; input: string; output: string; error: boolean; done: boolean }
-  | { k: "notice"; id: string; text: string; source: string | null }
+  | { k: "notice"; id: string; text: string }
   | { k: "compact"; id: string; text: string }
   | { k: "error"; id: string; text: string };
 
@@ -98,7 +98,6 @@ function items(entries: Row[]): Item[] {
   const tools = new Map<string, Extract<Item, { k: "tool" }>>();
   for (const entry of entries) {
     const id = entry.id as string;
-    const ts = typeof entry.timestamp === "string" ? entry.timestamp : null;
     if (entry.type === "compaction") {
       const summary = label(entry.summary);
       if (summary) out.push({ k: "compact", id, text: summary });
@@ -107,7 +106,7 @@ function items(entries: Row[]): Item[] {
     if (entry.type === "custom_message") {
       if (entry.display === false || typeof entry.content !== "string") continue;
       const text = entry.content.trim().replace(/^<system-notice>\s*/, "").replace(/\s*<\/system-notice>$/, "").trim();
-      if (text) out.push({ k: "notice", id, text, source: label(entry.customType) });
+      if (text) out.push({ k: "notice", id, text });
       continue;
     }
     if (entry.type !== "message") continue;
@@ -115,7 +114,7 @@ function items(entries: Row[]): Item[] {
     if (message.display === false) continue;
     if (message.role === "user") {
       const text = blockText(message.content);
-      if (text.trim()) out.push({ k: "user", id, text, ts, ...(message.steering === true ? { steer: true } : {}) });
+      if (text.trim()) out.push({ k: "user", id, text, ...(message.steering === true ? { steer: true } : {}) });
       continue;
     }
     if (message.role === "toolResult") {
@@ -133,9 +132,6 @@ function items(entries: Row[]): Item[] {
       const key = `${id}:${index}`;
       if (block.type === "text" && typeof block.text === "string" && block.text.trim()) {
         out.push({ k: "text", id: key, text: block.text });
-      } else if (block.type === "thinking") {
-        const text = typeof block.thinking === "string" ? block.thinking : typeof block.text === "string" ? block.text : "";
-        if (text.trim()) out.push({ k: "thinking", id: key, text });
       } else if (block.type === "toolCall" && typeof block.name === "string") {
         const input = record(block.arguments);
         const tool: Extract<Item, { k: "tool" }> = {
@@ -161,7 +157,7 @@ function items(entries: Row[]): Item[] {
 
 /** The session files in `dir`, newest first, each with omp's title (else its first message). */
 function sessions(dir: string) {
-  const out: { path: string; title: string; mtime: number; size: number }[] = [];
+  const out: { path: string; title: string; mtime: number }[] = [];
   let names: string[] = [];
   try { names = readdirSync(dir).filter((n) => n.endsWith(".jsonl")); } catch {}
   for (const name of names) {
@@ -180,7 +176,7 @@ function sessions(dir: string) {
         const message = record(entry.message);
         if (entry.type === "message" && message.role === "user") { title = blockText(message.content).replace(/\s+/g, " ").trim().slice(0, 120); break; }
       }
-      out.push({ path, title: title || "(empty)", mtime: stat.mtimeMs, size: stat.size });
+      out.push({ path, title: title || "(empty)", mtime: stat.mtimeMs });
     } catch {}
   }
   return out.sort((a, b) => b.mtime - a.mtime).slice(0, 200);
@@ -213,7 +209,6 @@ function status(entries: Row[]) {
     const effort = record(record(message.requestControls).effort).topLevel;
     return {
       model: typeof message.model === "string" ? message.model : null,
-      provider: typeof message.provider === "string" ? message.provider : null,
       effort: typeof effort === "string" ? effort : null,
       tokens: compacted ?? Number(record(message.usage).totalTokens),
       window: contextWindow(message.provider, message.model),
@@ -246,7 +241,7 @@ if (args[0] === "--sessions") {
   process.stdout.write(JSON.stringify(sessions(args[1] ?? "")));
 } else {
   const file = args[0];
-  const limit = option("--limit") ?? 150;
+  const limit = option("--limit");
   // --leaf <id> | --leaf none, with --after <last entry id>: where /tree or a rewind moved the leaf.
   const after = argument("--after");
   const leaf = argument("--leaf");
@@ -259,17 +254,18 @@ if (args[0] === "--sessions") {
   }
   const entries = branch(text.split("\n"), moved);
   const all = items(entries);
-  const end = Math.min(option("--before") ?? all.length, all.length);
-  const start = Math.max(0, end - limit);
-  const page = all.slice(start, end);
+  const start = limit === null ? 0 : Math.max(0, all.length - limit);
+  const page = all.slice(start);
   const palette = argument("--palette");
   const appHome = argument("--app-home");
   if (palette && appHome) {
     const colors = JSON.parse(palette) as Record<string, string>;
     for (const item of page) {
       if (item.k !== "text" || !hasParts(item.text)) continue;
-      const parts = await answerParts(item.text, colors, appHome);
-      if (parts) item.parts = parts;
+      try {
+        const parts = await answerParts(item.text, colors, appHome);
+        if (parts) item.parts = parts;
+      } catch {}
     }
   }
   process.stdout.write(JSON.stringify({ total: all.length, start, items: page, status: status(entries) }));

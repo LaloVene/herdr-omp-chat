@@ -23,7 +23,7 @@ export default class OmpChat extends View {
     return this.role.render(cx);
   }
 
-  async close() {
-    this.role.close();
+  close() {
+    return this.role.close();
   }
 }

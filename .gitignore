@@ -1,4 +1,6 @@
 .DS_Store
+# gpui-shell writes it on every run.
+gpui-kit.d.ts
 # Screenshots taken while checking the app; preview.png is the one RECIPE.md shows.
 /*.png
 /.*.png

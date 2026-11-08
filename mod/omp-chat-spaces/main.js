@@ -1,27 +1,12 @@
-// Workspace spaces: stable colored avatars, worktrees under their checkout,
-// grouped by machine when more than one is known. After a space's name, the repo
-// its first terminal is in now, only where unusual: branch, ahead/behind. Agent state lives in the agents list, not here. Click to
-// switch, right-click for its menu, drag to reorder.
+// Workspace spaces: stable colored avatars, worktrees under their checkout, grouped by machine
+// when more than one is known. After a space's name, only what's unusual about the repo its first
+// terminal is in now: repo, branch, ahead/behind. The avatar carries the space's agent status,
+// counting the omps shown as chat panes. Click to switch, right-click for its menu, drag to reorder.
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { spaces, machines, panes, terminals, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, layout } from "herdr";
-
-function find(node, id) {
-  if (node?.id === id) return node;
-  for (const child of node?.children ?? []) {
-    const found = find(child, id);
-    if (found) return found;
-  }
-  return null;
-}
-
-// The sidebar's rail goes by its width, not a flag: dragging its edge narrows it too. omp-chat
-// keeps the full lists down to 120px (Herdr's own mods switch at 160).
-const sidebarWidth = () => find(layout(), "sidebar")?.size?.px ?? Infinity;
-const narrow = () => sidebarWidth() < 120;
-// Between the bare rail and the full list: rail rows with their names.
-const labeled = () => sidebarWidth() >= 84;
+import { spaces, machines, panes, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window } from "herdr";
+import { narrow, labeled, spaceColor, chatPaneOmps } from "./omp-chat-shared.js";
 
 // Where a space is now: its first terminal's live folder, else where it was made.
 // `ps`: panes(), read once by the caller (each read copies every pane).
@@ -29,26 +14,11 @@ function place(s, ps) {
   const tabs = new Set((s.tabs ?? []).map((c) => c.id));
   return ps.find((p) => tabs.has(p.tab) && p.cwd)?.cwd || s.folder;
 }
-const rowHeight = ({ tree }) => (tree ? 28 : 30);
 const where = (s, ps) => JSON.stringify([s.machine ?? null, place(s, ps)]);
 const base = (path) => path.replace(/\/+$/, "").split("/").pop();
 // Changes made outside Herdr (an editor's save, a commit in another app): looked
 // for this often, in repos the list shows, while the window is in front.
 const FALLBACK = 60000;
-
-export function tone(t, status) {
-  return t[status] ?? t.unknown;
-}
-
-// What a stored color name looks like on an avatar (the same in every mod that draws space
-// avatars): one strong color per hue, light and dark alike.
-const MARK = { ansi6: "#22a99a", ansi3: "#e3814f", ansi4: "#5b8def", ansi5: "#8b7cf6", ansi2: "#3fae6a", ansi1: "#d9649a" };
-
-/** A space's own avatar color (`space.colors`, assigned by render). */
-export function spaceColor(t, id) {
-  const color = (shared("space.colors") ?? {})[id] ?? "ansi6";
-  return color.startsWith("#") ? color : (MARK[color] ?? t[color]);
-}
 
 const RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
 
@@ -58,18 +28,12 @@ const RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
  */
 function chatStatuses() {
   const out = new Map();
-  const map = shared("omp-chat.panes") ?? {};
-  if (!Object.keys(map).length) return out;
+  const omps = chatPaneOmps();
+  if (!omps.length) return out;
   const spaceOf = new Map(spaces().flatMap((s) => s.tabs.map((tab) => [tab.id, s.id])));
-  const all = terminals();
-  for (const p of panes()) {
-    const term = map[p.pane] && !p.terminal ? all.find((x) => x.address === map[p.pane]) : null;
-    const space = term && spaceOf.get(p.tab);
-    if (!space) continue;
-    // Herdr never sees a parked terminal: its "done" counts as seen once its chat pane showed that turn.
-    const seenDone = term.status === "done" && (p.focused || (shared("omp-chat.seen") ?? {})[map[p.pane]] === term.turn);
-    const status = term.status === "error" ? "blocked" : seenDone ? "idle" : term.status;
-    if ((RANK[status] ?? 0) > (RANK[out.get(space)] ?? 0)) out.set(space, status);
+  for (const { pane, status } of omps) {
+    const space = spaceOf.get(pane.tab);
+    if (space && (RANK[status] ?? 0) > (RANK[out.get(space)] ?? 0)) out.set(space, status);
   }
   return out;
 }
@@ -189,7 +153,6 @@ export default class Spaces extends View {
         else args.push(machine.target);
         args.push("--name", name);
         if (machine.session) args.push("--session", machine.session);
-        if (machine.temporary) args.push("--temp");
         await ask(args);
         this.folded.delete(name);
         localStorage.setItem("machines.folded", JSON.stringify([...this.folded]));
@@ -330,7 +293,8 @@ export default class Spaces extends View {
     // A space's status, counting the omps it shows as chat panes.
     const chat = chatStatuses();
     const statusOf = (w) => ((RANK[chat.get(w.id)] ?? 0) > (RANK[w.status] ?? 0) ? chat.get(w.id) : w.status);
-    const draw = (r) => (collapsed ? this.compact(r, t, statusOf(r.w)) : this.row(r, t, statusOf(r.w)));
+    const fromIndex = this.pressed === null ? -1 : spaces().findIndex((s) => s.id === this.pressed);
+    const draw = (r) => (collapsed ? this.compact(r, t, statusOf(r.w)) : this.row(r, t, statusOf(r.w), fromIndex));
     const remote = [...new Set([...rows.map(r => r.w.machine).filter(Boolean), ...this.machines.map(m => m.name), ...Object.keys(this.reconnecting)])].sort();
     const loading = m => {
       const layout = machines().find(k => k.name === m)?.layout;
@@ -385,7 +349,7 @@ export default class Spaces extends View {
     const same = (a) => a.toLowerCase() === name.toLowerCase();
     const branch = same(raw) || raw === "master" || raw === "main" ? "" : raw;
     const repo = tree || same(g.name) ? "" : g.name;
-    const where = [repo, branch].filter(Boolean).join(" \u00b7 ");
+    const label = [repo, branch].filter(Boolean).join(" \u00b7 ");
     return h_flex()
       .flex_1()
       .min_w(0)
@@ -394,19 +358,19 @@ export default class Spaces extends View {
       .items_center()
       .text_size(11.5)
       .text_color(t.dim)
-      .when(Boolean(where), (el) => el.child(div().min_w(0).truncate().child(where)))
+      .when(Boolean(label), (el) => el.child(div().min_w(0).truncate().child(label)))
       .when(g.ahead > 0, (el) => el.child(div().flex_none().text_color(t.ansi2).child(`\u2191${g.ahead}`)))
       .when(g.behind > 0, (el) => el.child(div().flex_none().text_color(t.ansi1).child(`\u2193${g.behind}`)));
   }
 
-  row({ w, i, g, tree }, t, status) {
+  // `fromIndex`: where the dragged space is in spaces(), -1 when none is.
+  row({ w, i, g, tree }, t, status, fromIndex) {
     const on = w.active;
-    const fromIndex = this.pressed === null ? -1 : spaces().findIndex(s => s.id === this.pressed);
     return v_flex()
       .relative()
       .id(`space-${w.id}`)
       .px(8)
-      .h(rowHeight({ tree }))
+      .h(tree ? 28 : 30)
       .flex_none()
       .justify_center()
       .rounded(8)
@@ -423,9 +387,10 @@ export default class Spaces extends View {
         this.over = w.id;
       })
       .on_mouse_move((_e, cx) => {
+        if (this.pressed === null) return;
         const source = spaces().find(s => s.id === this.pressed);
         const over = source && (source.machine ?? null) === (w.machine ?? null) ? w.id : null;
-        if (this.pressed !== null && this.over !== over) {
+        if (this.over !== over) {
           this.over = over;
           cx.notify();
         }
@@ -458,7 +423,7 @@ export default class Spaces extends View {
   // finished unseen, red when one needs you, its own color when its agents are idle, grey without
   // an agent.
   avatar(w, tree, status, t) {
-    const fill = status === "idle" ? spaceColor(t, w.id) : tone(t, status);
+    const fill = status === "idle" ? spaceColor(t, w.id) : t[status] ?? t.unknown;
     const mark = tree
       ? svg("mods/workspace-chrome/branch.svg").size(14).flex_none().text_color(fill)
       : h_flex().size(18).flex_none().rounded(5).bg(fill).items_center().justify_center()
@@ -513,8 +478,10 @@ export default class Spaces extends View {
         .when(!collapsed, el => el.child("Spaces"))
         .child(div().id("space-new").size(26).flex_none().flex().items_center().justify_center().rounded(6).hover(s => s.bg(t.hover).text_color(t.foreground))
           .on_click(() => run("space.new")).child(svg("mods/workspace-chrome/plus.svg").size(14))))
-      .child(v_flex().flex_1().min_h(0).px(8).pb(14).overflow_y_scrollbar().mode("always")
-        .on_mouse_up("left", (_e, cx) => { this.pressed = null; cx.notify(); })
+      .child(v_flex().id("space-list").flex_1().min_h(0).px(8).pb(14).overflow_y_scrollbar().mode("always")
+        .on_mouse_up("left", (_e, cx) => { this.pressed = this.over = null; cx.notify(); })
+        // Released outside the list never reaches it: leaving it ends the drag.
+        .on_hover((on, cx) => { if (on || this.pressed === null) return; this.pressed = this.over = null; cx.notify(); })
         .children(this.grouped(t, collapsed)));
   }
 }

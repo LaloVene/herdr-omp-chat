@@ -4,7 +4,7 @@ Parts of omp-chat port logic (not UI) from Ovis (https://github.com/devswha/ovis
 
 - `mod/omp-chat/transcript.ts`: record rules from `server/transcript-records.ts` (`createOmpTranscriptParser`, `toolSummary`).
 - `mod/omp-chat/answer.js`: omp dialog shapes and key sequences from `server/dialogs/omp.ts`.
-- `mod/omp-chat/chat.js`: the terminal-bound command list from `server/skills/omp.ts`.
+- `mod/omp-chat/composer.js`: the terminal-bound command list from `server/skills/omp.ts`.
 
 ```
 MIT License

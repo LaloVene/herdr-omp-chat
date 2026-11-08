@@ -1,15 +1,7 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { spaces, panes, terminals, run, openOverlay, theme, window, shared, layout, settings } from "herdr";
-
-function find(node, id) {
-  if (node?.id === id) return node;
-  for (const child of node?.children ?? []) {
-    const found = find(child, id);
-    if (found) return found;
-  }
-  return null;
-}
+import { spaces, panes, run, openOverlay, theme, window, shared, layout, settings } from "herdr";
+import { findNode, chatPaneOmps } from "./omp-chat-shared.js";
 
 export default class Tabs extends View {
   init() {
@@ -54,9 +46,8 @@ export default class Tabs extends View {
       .on_mouse_down("left", stop).on_click(action).child(label);
     // omp-chat: a chat pane has no program of its own; it stands for the omp terminal it parked.
     const ps = panes();
-    const chat = shared("omp-chat.panes") ?? {};
-    const all = Object.keys(chat).length ? terminals() : [];
-    const programOf = (p) => p.program ?? all.find((x) => x.address === chat[p.pane])?.program;
+    const parked = new Map(chatPaneOmps(ps).map(({ pane, term }) => [pane.pane, term.program]));
+    const programOf = (p) => p.program ?? parked.get(p.pane);
     const item = (c, i) => {
       const mine = ps.filter((p) => p.tab === c.id);
       const program = mine.map(programOf).find((g) => g?.agent) ?? programOf(mine[0] ?? {});
@@ -77,12 +68,12 @@ export default class Tabs extends View {
         .when(c.status === "blocked" || c.status === "done", el => el.child(div().size(6).rounded(3).bg(t[c.status])))
         .when(c.active, el => el.child(div().id(`close-${c.id}`).text_color(t.dim).on_mouse_down("left", stop).on_click((_e, cx) => { cx.stop_propagation(); run("tab.close", { id: c.id }); }).child(svg("mods/pane/close.svg").size(12))));
     };
-    const root = layout(), sidebar = find(root, "sidebar"), w = window();
+    const root = layout(), sidebar = findNode(root, "sidebar"), w = window();
     // Old saved rails and a dragged-narrow sidebar can be smaller than the window buttons.
     const lightsPadding = w?.platform === "macos" && w.titlebar === "none" && !w.fullscreen && root?.traffic_lights
       ? Math.max(10, (root.traffic_lights[0] + 64) / settings().zoom - (sidebar?.hidden ? 0 : sidebar?.size?.px ?? 0))
       : 10;
-    const panel = find(root, "panel"), body = find(root, "panel-body");
+    const panel = findNode(root, "panel"), body = findNode(root, "panel-body");
     const enabled = shared("workspace.panels") ?? ["files", "changes"];
     this.syncPanel(space, panel, body, enabled);
     // omp-chat: the panel buttons are icons only, named on hover.
@@ -103,8 +94,8 @@ export default class Tabs extends View {
       .child(button("tab-new", "+", () => openOverlay({ mod: "new-menu", kind: "popup", width: 250, height: 512 })))
       .when(enabled.includes("files"), el => el.child(panelButton("files", "Files", "mods/files/file.svg")))
       .when(enabled.includes("changes"), el => el.child(panelButton("changes", "Changes", "mods/changes/changes.svg")))
-      .when(w?.buttons, el => el.child(button("minimize", w.platform === "windows" ? svg("mods/omp-chat-tabs/win-min.svg").size(16) : "−", () => run("window.minimize")))
-        .child(button("maximize", w.platform === "windows" ? svg(`mods/omp-chat-tabs/${w.maximized ? "win-restore" : "win-max"}.svg`).size(16) : "□", () => run("window.maximize")))
-        .child(button("close-window", w.platform === "windows" ? svg("mods/omp-chat-tabs/win-close.svg").size(16) : svg("mods/pane/close.svg").size(13), () => run("window.close"))));
+      .when(w?.buttons, el => el.child(button("minimize", w.platform === "windows" ? svg("mods/tabs/win-min.svg").size(16) : "−", () => run("window.minimize")))
+        .child(button("maximize", w.platform === "windows" ? svg(`mods/tabs/${w.maximized ? "win-restore" : "win-max"}.svg`).size(16) : "□", () => run("window.maximize")))
+        .child(button("close-window", w.platform === "windows" ? svg("mods/tabs/win-close.svg").size(16) : svg("mods/pane/close.svg").size(13), () => run("window.close"))));
   }
 }
