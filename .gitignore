@@ -1,0 +1,5 @@
+.DS_Store
+# Screenshots taken while checking the app; preview.png is the one RECIPE.md shows.
+/*.png
+/.*.png
+!/preview.png
