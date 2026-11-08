@@ -10,9 +10,10 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP="${HERDR_APP_HOME:-$HOME/.config/herdr-app}"
 EXT_DIR="$HOME/.omp/agent/extensions"
 MOD="$APP/mods/omp-chat"
-# Clones of Herdr's sidebar and bar mods (spaces, agents, the brand/footer chrome, tabs):
-# status-colored icons, chat-pane omps listed, the rail only below 120px, icon-only panel buttons.
-RAILS=(omp-chat-spaces omp-chat-agents omp-chat-chrome omp-chat-tabs)
+# Clones of Herdr's sidebar, bar and panel mods (spaces, agents, the brand/footer chrome, tabs,
+# files, changes): status-colored icons, chat-pane omps listed, the rail only below 120px,
+# icon-only panel buttons, frosted-glass backgrounds.
+RAILS=(omp-chat-spaces omp-chat-agents omp-chat-chrome omp-chat-tabs omp-chat-files omp-chat-changes)
 LAYOUT="$APP/layouts/omp-chat.json"
 PREVIEW="$APP/layouts/omp-chat.svg"
 # The frosted glass: a blurred copy of the desktop picture painted behind the translucent panels.
