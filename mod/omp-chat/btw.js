@@ -8,6 +8,7 @@ import { ROOT, dirOf, readJson, listDir, sendRequest, loadStates, watchRoot, omp
 import { blocks } from "./blocks.js";
 import { BTW_BLOCK } from "./view.js";
 import { SPINNER, ReplyBox, CopyButtons } from "./common.js";
+import { GLASS } from "./omp-chat-shared.js";
 
 export class Btw {
   init(cx) {
@@ -142,7 +143,7 @@ export class Btw {
       .child(button("btw-new", "New topic", (_e, cx) => { this.selected = null; this.box.input.focus(); cx.notify(); }))
       .child(button("btw-close", "✕", () => run("layout.hide", { id: BTW_BLOCK })));
 
-    const root = v_flex().id("btw").size_full().bg(t.background).text_color(t.foreground)
+    const root = v_flex().id("btw").size_full().bg(t.background + GLASS.pane).text_color(t.foreground)
       .track_focus(this.handle).on_key_down((e, cx) => {
         if (e.key === "escape" && !this.box.text) { run("layout.hide", { id: BTW_BLOCK }); cx.stop_propagation(); }
       })
@@ -189,7 +190,7 @@ export class Btw {
       .when(Boolean(this.error), (el) => el.child(div().text_size(12).text_color(t.blocked).child(this.error)))
       .child(div().text_size(11).text_color(t.dim).child(topic ? "Follow-up in this topic" : "New topic"))
       .child(h_flex().gap(8).items_end()
-        .child(div().flex_1().min_w(0).px(9).py(6).rounded(8).border_1().border_color(t.input).bg(t.background)
+        .child(div().flex_1().min_w(0).px(9).py(6).rounded(8).border_1().border_color(t.input).bg(t.background + GLASS.inset)
           .child(Textarea.new(this.box.input).w_full().text_size(13).text_color(t.foreground)))
         .child(running
           ? button("btw-cancel", "Cancel", (_e, cx) => this.cancel(running, cx))

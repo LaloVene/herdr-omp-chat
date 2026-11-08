@@ -8,6 +8,13 @@ export const PANES_KEY = "omp-chat.panes";
 /** Turns of parked omps someone saw "done" in their chat pane: { [terminal]: turn }. */
 export const SEEN_KEY = "omp-chat.seen";
 
+// Frosted glass: the layout paints a blurred copy of the wallpaper (backgrounds/omp-chat-glass.jpg)
+// behind everything, and these alpha suffixes turn opaque theme colors (#rrggbb) into the panes
+// over it: `chrome` for the sidebar and tab bar, `pane` for chat panes and headers (the layout's
+// terminal_opacity 0.48 looks the same: Herdr's terminal tint isn't linear), `inset` for wells
+// set into a pane (code, reply box).
+export const GLASS = { chrome: "8c", pane: "b8", inset: "59" };
+
 export function findNode(node, id) {
   if (node?.id === id) return node;
   for (const child of node?.children ?? []) {

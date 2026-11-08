@@ -6,7 +6,7 @@ import { h_flex } from "gpui-base";
 import { panes, terminals, props, run, theme, nextCommand } from "herdr";
 import { loadStates, watchRoot, chatPanes } from "./channel.js";
 import { toChat, toTerminal, BTW_BLOCK } from "./view.js";
-import { programIcon } from "./omp-chat-shared.js";
+import { programIcon, GLASS } from "./omp-chat-shared.js";
 import { folder } from "./common.js";
 
 /** Chat, terminal and btw as small icon buttons; `view` is the pane's mode. */
@@ -90,7 +90,7 @@ export class Header {
     const close = chat
       ? (cx) => toTerminal(pane, omp.terminal, cx, { thenClose: true })
       : () => run("pane.close", { pane });
-    return h_flex().id(`pane-head-${pane}`).size_full().px(10).gap(8).items_center().bg(t.background)
+    return h_flex().id(`pane-head-${pane}`).size_full().px(10).gap(8).items_center().bg(t.background + GLASS.pane)
       .border_b(1).border_color(t.border).text_size(12)
       .on_hover((hovered, cx) => { this.hovered = hovered; cx.notify(); })
       .on_click(() => run("pane.focus", { pane }))

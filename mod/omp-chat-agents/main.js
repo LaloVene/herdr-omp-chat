@@ -4,7 +4,7 @@
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, appHome, readTextFile, exec } from "herdr";
-import { narrow, labeled, spaceColor, programIcon, SESSION_ICON, chatPaneOmps } from "./omp-chat-shared.js";
+import { narrow, labeled, spaceColor, programIcon, SESSION_ICON, chatPaneOmps, GLASS } from "./omp-chat-shared.js";
 
 const clean = (s) => (s ?? "").replace(/^[^\p{L}\p{N}]+/u, "").trim();
 
@@ -427,7 +427,7 @@ export default class Agents extends View {
     return v_flex()
       .size_full()
       .min_h(0)
-      .bg(t.chrome)
+      .bg(t.chrome + GLASS.chrome)
       .border_t(1)
       .border_color(t.border)
       .text_size(13)

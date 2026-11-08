@@ -15,6 +15,8 @@ MOD="$APP/mods/omp-chat"
 RAILS=(omp-chat-spaces omp-chat-agents omp-chat-chrome omp-chat-tabs)
 LAYOUT="$APP/layouts/omp-chat.json"
 PREVIEW="$APP/layouts/omp-chat.svg"
+# The frosted glass: a blurred copy of the desktop picture painted behind the translucent panels.
+BACKDROP="$APP/backgrounds/omp-chat-glass.jpg"
 LINK="$EXT_DIR/omp-chat-bridge.ts"
 MARKER="$MOD/.installed-by-herdr-omp-chat"
 KEY_SECTION="layout:omp-chat"
@@ -73,6 +75,19 @@ else:
 PY
 }
 
+# Blur the current desktop picture into $BACKDROP (OMP_CHAT_WALLPAPER picks another picture).
+# Without one the layout still works, on a plain dark canvas.
+backdrop() {
+  local pic="${OMP_CHAT_WALLPAPER:-}"
+  [ -n "$pic" ] || pic=$(osascript -e 'tell application "System Events" to get picture of desktop 1' 2>/dev/null || true)
+  if [ ! -f "$pic" ] || ! command -v swift >/dev/null; then
+    echo "omp-chat: no frosted backdrop (needs swift and a desktop picture file; set OMP_CHAT_WALLPAPER)" >&2
+    return
+  fi
+  run mkdir -p "${BACKDROP%/*}"
+  run swift "$HERE/tools/glass-backdrop.swift" "$pic" "$BACKDROP" || echo "omp-chat: could not blur $pic" >&2
+}
+
 copy_files() {
   run mkdir -p "$MOD" "$APP/layouts" "$EXT_DIR"
   # Files an earlier version shipped must not linger (the marker is hidden, so it stays).
@@ -87,6 +102,7 @@ copy_files() {
   run cp "$HERE/layouts/omp-chat.svg" "$PREVIEW"
   [ "$dry" = 1 ] && echo "would: write $MARKER" || date -u +%FT%TZ > "$MARKER"
   run ln -sfn "$HERE/extension/omp-chat-bridge.ts" "$LINK"
+  backdrop
 }
 
 ours_link() { [ -L "$LINK" ] && [ "$(readlink "$LINK")" = "$HERE/extension/omp-chat-bridge.ts" ]; }
@@ -127,7 +143,9 @@ case "$mode" in
       if [[ $status == *'"layout": "omp-chat"'* ]]; then run herdr-app do layout.switch --name main; fi
     fi
     run rm -rf "$MOD" "${RAILS[@]/#/$APP/mods/}"
-    run rm -f "$LAYOUT" "$PREVIEW"
+    run rm -f "$LAYOUT" "$PREVIEW" "$BACKDROP"
+    # backgrounds/ only if the backdrop was all it held.
+    [ -d "${BACKDROP%/*}" ] && run rmdir "${BACKDROP%/*}" 2>/dev/null || true
     run rm -f "$APP/layouts/.state/omp-chat.json"
     ours_link && run rm -f "$LINK"
     run rm -rf "$APP/data/omp-chat" "$APP/data/omp-chat-render" "$APP/data/omp-chat-stream"

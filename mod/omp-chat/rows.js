@@ -2,6 +2,7 @@
 import { div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, TextView } from "gpui-base";
 import { SPINNER } from "./common.js";
+import { GLASS } from "./omp-chat-shared.js";
 
 /** A fenced code block that no backtick run inside `text` can close. */
 export function fenced(text, lang = "") {
@@ -121,7 +122,7 @@ export function drawRow(row, v) {
       const color = !row.done ? t.working : row.error ? t.blocked : t.done;
       const box = (label, text, id) => v_flex().w_full().gap(3)
         .child(div().text_size(10.5).text_color(t.dim).child(label))
-        .child(div().w_full().max_h(320).overflow_hidden().rounded(7).bg(t.background).border_1().border_color(t.border).px(8).text_size(12)
+        .child(div().w_full().max_h(320).overflow_hidden().rounded(7).bg(t.background + GLASS.inset).border_1().border_color(t.border).px(8).text_size(12)
           .child(TextView.markdown(id, fenced(text)).selectable(true).w_full()));
       return v_flex().w_full().py(2).gap(6).cursor_pointer()
         .child(h_flex().w_full().gap(8).items_center().px(9).py(6).rounded(8).bg(t.raised).text_size(12.5)

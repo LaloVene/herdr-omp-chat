@@ -6,7 +6,11 @@
     12,
     16
   ],
-  "background": "canvas",
+  "background": {
+    "image": "backgrounds/omp-chat-glass.jpg",
+    "fit": "cover"
+  },
+  "terminal_opacity": 0.48,
   "terminal_padding": [
     14,
     12
@@ -24,7 +28,6 @@
       },
       "min": 44,
       "max": 480,
-      "background": "chrome",
       "resizable": false,
       "children": [
         {
@@ -125,7 +128,6 @@
                 "pane": {
                   "gap": 8,
                   "radius": 10,
-                  "background": "background",
                   "lone": true,
                   "border": {
                     "width": 1,
@@ -163,7 +165,6 @@
                 "width": 1,
                 "color": "border"
               },
-              "background": "background",
               "content": {
                 "mod": "omp-chat",
                 "props": {

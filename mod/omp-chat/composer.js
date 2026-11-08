@@ -7,6 +7,7 @@ import { exec, shared, setShared } from "herdr";
 import { send, sendRequest } from "./channel.js";
 import { LIST_CONTEXT, ReplyBox } from "./common.js";
 import { Picker } from "./picker.js";
+import { GLASS } from "./omp-chat-shared.js";
 
 // Unsent text per terminal: { [terminal]: text }.
 const DRAFTS_KEY = "omp-chat.drafts";
@@ -264,10 +265,10 @@ export class Composer {
           .child(div().font_family(mono).text_size(12.5).text_color(t.foreground).truncate().when(Boolean(c.detail), (el) => el.flex_none()).when(!c.detail, (el) => el.flex_1()).child(c.label))
           .when(Boolean(c.detail), (el) => el.child(div().flex_1().truncate().text_size(12).text_color(t.dim).child(c.detail)))))))
       .when(Boolean(this.error), (el) => el.child(div().text_size(12).text_color(t.blocked).child(this.error)))
-      // The status label is the frame's sibling, not its child: a frame paints its border over its
-      // own children, so only a later sibling's background can cut the line.
+      // The status chip is the frame's sibling, not its child: a frame paints its border over its
+      // own children, so only a later sibling sits on top of the line.
       .child(div().w_full().mt(4).relative()
-      .child(h_flex().w_full().gap(8).items_center().px(10).py(4).rounded(12).border_1().border_color(t.input).bg(t.background)
+      .child(h_flex().w_full().gap(8).items_center().px(10).py(4).rounded(12).border_1().border_color(t.input).bg(t.background + GLASS.inset)
         // While the list is open, ↑ ↓ and Tab belong to it: the "OmpChatList" context lets the
         // bindings from bindListKeys outrank the text area's own (cursor up/down, indent).
         .child(div().flex_1().py(5).key_context(shown.length ? LIST_CONTEXT : "OmpChatReply")
@@ -299,9 +300,9 @@ function statusLine(t, s, last) {
   const size = (n) => (n >= 1e6 ? `${+(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}K` : String(n));
   const fill = pct === null ? t.border : pct >= 85 ? t.blocked : pct >= 60 ? t.working : t.accent;
   const icon = EFFORT_ICONS[effort];
-  // The background hides the border under the label, so the line seems to run into it.
-  return h_flex().id("chat-status").absolute().top(-8).right(16).h(14).max_w(220).px(6).gap(6).items_center()
-    .bg(t.background).text_size(11).text_color(t.muted)
+  // A chip over the frame's top border: on glass no flat color can hide the line under it.
+  return h_flex().id("chat-status").absolute().top(-9).right(16).h(16).max_w(220).px(7).gap(6).items_center()
+    .rounded(8).border_1().border_color(t.input).bg(t.popover).text_size(11).text_color(t.muted)
     .tooltip([model, effort && `effort ${effort}`, tokens && `${pct !== null ? `${Math.round(pct)}% · ` : ""}${size(tokens)}${window ? ` of ${size(window)}` : ""} context`].filter(Boolean).join(" · "))
     .when(Boolean(icon), (el) => el.child(div().flex_none().text_size(12).child(icon)))
     .child(div().min_w(0).truncate().child(model ? String(model).replace(/^Claude /, "") : ""))

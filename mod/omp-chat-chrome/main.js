@@ -1,7 +1,7 @@
 import { View, div, image, svg } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
 import { theme, run, props, window, shared, setShared, updates } from "herdr";
-import { sidebarWidth, narrow } from "./omp-chat-shared.js";
+import { sidebarWidth, narrow, GLASS } from "./omp-chat-shared.js";
 
 // To the rail (on macOS wide enough for the traffic lights), or back to the width it had.
 function toggleSidebar() {
@@ -24,7 +24,7 @@ export default class OmpChatChrome extends View {
     if (props()?.footer) {
       const ready = div().size(6).rounded_full().bg(t.accent);
       // omp-chat's footer: Settings only (no Add machine).
-      return v_flex().size_full().bg(t.chrome).border_t(1).border_color(t.border).px(8).pt(4).pb(8).text_size(13)
+      return v_flex().size_full().bg(t.chrome + GLASS.chrome).border_t(1).border_color(t.border).px(8).pt(4).pb(8).text_size(13)
         .when(collapsed, el => el.px(0).items_center())
         .child(h_flex().id("settings").h(28).px(8).gap(9).items_center().rounded(8)
           .when(collapsed, el => el.relative().w(32).px(0).justify_center().tooltip("Settings"))
@@ -34,7 +34,7 @@ export default class OmpChatChrome extends View {
           .when(Boolean(updates().app.ready), el => el.child(collapsed ? ready.absolute().top(5).right(6) : ready)))
         .when(footerToggle, el => el.flex_row().justify_center().gap(4).child(this.button("sidebar-toggle", svg("mods/workspace-chrome/sidebar.svg").size(15), toggleSidebar)));
     }
-    return h_flex().size_full().bg(t.chrome).pl(collapsed ? 6 : 14).pr(10).gap(4).items_center().text_size(13.5)
+    return h_flex().size_full().bg(t.chrome + GLASS.chrome).pl(collapsed ? 6 : 14).pr(10).gap(4).items_center().text_size(13.5)
       .when(window()?.platform === "macos" && !window()?.fullscreen && !collapsed, el => el.pl(76))
       .when(!collapsed, el => el.child(h_flex().flex_1().gap(8).items_center().child(image("frame/welcome/herdr.png").size(20).rounded(5)).child(div().font_semibold().text_color(t.foreground).child("Herdr"))))
       .when(!collapsed, el => el.child(this.button("search", svg("mods/workspace-chrome/search.svg").size(15), () => run("mod.open", { name: "picker" }))))

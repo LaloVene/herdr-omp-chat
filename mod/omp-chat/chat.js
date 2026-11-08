@@ -8,7 +8,7 @@ import { exec, appHome, focused, panes, terminals, theme, settings, watchFolder,
 import { ROOT, dirOf, readJson, watchRoot, chatPanes, setChatPanes, forgetChatPane } from "./channel.js";
 import { wait } from "./answer.js";
 import { toTerminal } from "./view.js";
-import { SEEN_KEY } from "./omp-chat-shared.js";
+import { SEEN_KEY, GLASS } from "./omp-chat-shared.js";
 import { HELPER, COPY_BUTTON, CopyButtons, bindListKeys } from "./common.js";
 import { feedRows, drawRow } from "./rows.js";
 import { Cards } from "./cards.js";
@@ -352,7 +352,7 @@ export class Chat {
     }
     const zoom = settings().zoom ?? 1;
     this.working = this.isWorking();
-    const root = v_flex().id("omp-chat").size_full().min_h(0).bg(t.background).text_color(t.foreground)
+    const root = v_flex().id("omp-chat").size_full().min_h(0).bg(t.background + GLASS.pane).text_color(t.foreground)
       .track_focus(this.handle)
       .on_size_change((size, cx) => {
         const width = Math.round(size.width / zoom);

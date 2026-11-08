@@ -4,7 +4,7 @@
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { exec, theme } from "herdr";
-import { narrow, labeled } from "./omp-chat-shared.js";
+import { narrow, labeled, GLASS } from "./omp-chat-shared.js";
 
 const REFRESH_MS = 5 * 60 * 1000;
 const PROVIDER_NAMES = { anthropic: "Anthropic", openai: "OpenAI", "openai-codex": "Codex", "github-copilot": "Copilot", "google-antigravity": "Antigravity", google: "Google" };
@@ -92,7 +92,7 @@ export class Stats {
 
   render() {
     const t = theme();
-    const root = v_flex().id("omp-stats").size_full().min_h(0).text_size(12).text_color(t.foreground);
+    const root = v_flex().id("omp-stats").size_full().min_h(0).bg(t.chrome + GLASS.chrome).text_size(12).text_color(t.foreground);
     const list = accounts(this.report);
     // Bars and numbers show what is left; the color still warns as use grows.
     const color = (f, status) => (status === "exhausted" || f >= 0.9 ? t.blocked : f >= 0.7 ? t.working : t.accent);

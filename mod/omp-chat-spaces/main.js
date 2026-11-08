@@ -6,7 +6,7 @@
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { spaces, machines, panes, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window } from "herdr";
-import { narrow, labeled, spaceColor, chatPaneOmps } from "./omp-chat-shared.js";
+import { narrow, labeled, spaceColor, chatPaneOmps, GLASS } from "./omp-chat-shared.js";
 
 // Where a space is now: its first terminal's live folder, else where it was made.
 // `ps`: panes(), read once by the caller (each read copies every pane).
@@ -470,7 +470,7 @@ export default class Spaces extends View {
       changed = true;
     }
     if (changed) setShared("space.colors", kept);
-    return v_flex().size_full().min_h(0).bg(t.chrome).text_size(13)
+    return v_flex().size_full().min_h(0).bg(t.chrome + GLASS.chrome).text_size(13)
       // In the rail the + lines up with the avatars under it: centred, or (with names) over them.
       .child(h_flex().h(31).items_center().text_size(11.5).text_color(t.dim)
         .when(!collapsed, el => el.pl(16).pr(10).justify_between())
